@@ -1,0 +1,39 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+import '../../../shared/models/api_key_model.dart';
+
+class ApiKeyService {
+  static const String _apiKeyKey = 'user_api_key';
+
+  Future<void> saveApiKey(ApiKeyModel apiKey) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_apiKeyKey, json.encode(apiKey.toJson()));
+  }
+
+  Future<ApiKeyModel?> getApiKey() async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonString = prefs.getString(_apiKeyKey);
+    if (jsonString != null) {
+      return ApiKeyModel.fromJson(json.decode(jsonString) as Map<String, dynamic>);
+    }
+    return null;
+  }
+
+  Future<void> deleteApiKey() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_apiKeyKey);
+  }
+
+  Future<bool> hasApiKey() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.containsKey(_apiKeyKey);
+  }
+}
+
+final apiKeyServiceProvider = Provider<ApiKeyService>((ref) => ApiKeyService());
+
+final apiKeyProvider = FutureProvider<ApiKeyModel?>((ref) async {
+  final service = ref.watch(apiKeyServiceProvider);
+  return await service.getApiKey();
+});

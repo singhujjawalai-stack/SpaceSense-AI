@@ -1,0 +1,420 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../auth/data/auth_service.dart';
+import '../../../settings/data/api_key_service.dart';
+import '../../../../core/ai/ai_service.dart';
+import '../../../../shared/models/api_key_model.dart';
+
+class SettingsScreen extends ConsumerStatefulWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  String? _selectedProvider;
+  String? _selectedModel;
+  final _apiKeyController = TextEditingController();
+  bool _isLoading = false;
+  bool _isTesting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadApiKey();
+  }
+
+  @override
+  void dispose() {
+    _apiKeyController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadApiKey() async {
+    final apiKeyService = ref.read(apiKeyServiceProvider);
+    final apiKey = await apiKeyService.getApiKey();
+    if (apiKey != null && mounted) {
+      setState(() {
+        _selectedProvider = apiKey.provider;
+        // A previously saved model may have been retired by the provider
+        // (e.g. gemini-1.5). Force re-selection instead of a guaranteed 404.
+        final models = SupportedProvider.models[apiKey.provider] ?? const [];
+        _selectedModel = models.contains(apiKey.model) ? apiKey.model : null;
+        _apiKeyController.text = apiKey.apiKey;
+      });
+    }
+  }
+
+  Future<void> _saveApiKey() async {
+    if (_selectedProvider == null || _selectedModel == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select provider and model')),
+      );
+      return;
+    }
+
+    if (_apiKeyController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter your API key')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final apiKey = ApiKeyModel(
+        provider: _selectedProvider!,
+        model: _selectedModel!,
+        apiKey: _apiKeyController.text.trim(),
+      );
+
+      final apiKeyService = ref.read(apiKeyServiceProvider);
+      await apiKeyService.saveApiKey(apiKey);
+
+      // Refresh the cached apiKeyProvider so other screens see the new key
+      ref.invalidate(apiKeyProvider);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('API key saved successfully')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error saving API key: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  /// Validates the entered key against the AI provider directly.
+  Future<void> _testApiKey() async {
+    if (_selectedProvider == null || _selectedModel == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select provider and model')),
+      );
+      return;
+    }
+    if (_apiKeyController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter your API key')),
+      );
+      return;
+    }
+
+    setState(() => _isTesting = true);
+    try {
+      final aiService = ref.read(aiServiceProviderSimple);
+      final ok = await aiService.validateKey(
+        provider: _selectedProvider!,
+        model: _selectedModel!,
+        apiKey: _apiKeyController.text.trim(),
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(ok
+                ? 'Connected successfully to ${_selectedProvider!}!'
+                : 'Connection failed — check your API key'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isTesting = false);
+    }
+  }
+
+  Future<void> _deleteApiKey() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete API Key'),
+        content: const Text('Are you sure you want to delete your API key?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      final apiKeyService = ref.read(apiKeyServiceProvider);
+      await apiKeyService.deleteApiKey();
+      setState(() {
+        _selectedProvider = null;
+        _selectedModel = null;
+        _apiKeyController.clear();
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('API key deleted')),
+        );
+      }
+    }
+  }
+
+  Future<void> _signOut() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sign Out'),
+        content: const Text('Are you sure you want to sign out?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Sign Out'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      final authService = ref.read(authServiceProvider);
+      await authService.signOut();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = ref.watch(currentUserProvider);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Settings'),
+        elevation: 0,
+        backgroundColor: Colors.transparent,
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(24.0),
+          children: [
+            // Account section
+            Text(
+              'Account',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: 16),
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.email_outlined),
+                title: const Text('Email'),
+                subtitle: Text(user?.email ?? 'Not logged in'),
+              ),
+            ),
+            const SizedBox(height: 32),
+
+            // API Configuration section
+            Text(
+              'API Configuration',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      value: _selectedProvider,
+                      decoration: const InputDecoration(
+                        labelText: 'AI Provider',
+                        prefixIcon: Icon(Icons.business),
+                      ),
+                      items: SupportedProvider.all.map((provider) {
+                        return DropdownMenuItem(
+                          value: provider,
+                          child: Text(provider.toUpperCase()),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedProvider = value;
+                          _selectedModel = null;
+                        });
+                      },
+                    ),
+                    if (_selectedProvider != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8, left: 4),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _selectedProvider == SupportedProvider.google
+                                  ? Icons.savings_outlined
+                                  : Icons.payments_outlined,
+                              size: 14,
+                              color: _selectedProvider == SupportedProvider.google
+                                  ? Colors.green
+                                  : Colors.grey[500],
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                SupportedProvider.hint(_selectedProvider!)!,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: _selectedProvider == SupportedProvider.google
+                                      ? Colors.green[700]
+                                      : Colors.grey[600],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    const SizedBox(height: 16),
+                    if (_selectedProvider != null)
+                      DropdownButtonFormField<String>(
+                        value: _selectedModel,
+                        decoration: const InputDecoration(
+                          labelText: 'Model',
+                          prefixIcon: Icon(Icons.psychology),
+                        ),
+                        items: SupportedProvider.models[_selectedProvider]!
+                            .map((model) {
+                          return DropdownMenuItem(
+                            value: model,
+                            child: Text(model),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() => _selectedModel = value);
+                        },
+                      ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _apiKeyController,
+                      decoration: const InputDecoration(
+                        labelText: 'API Key',
+                        hintText: 'Enter your API key',
+                        prefixIcon: Icon(Icons.vpn_key),
+                      ),
+                      obscureText: true,
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _isTesting ? null : _testApiKey,
+                            icon: _isTesting
+                                ? const SizedBox(
+                                    height: 16,
+                                    width: 16,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.wifi_tethering),
+                            label: const Text('Test Connection'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: _isLoading ? null : _saveApiKey,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor:
+                                  Theme.of(context).colorScheme.primary,
+                              foregroundColor: Colors.white,
+                            ),
+                            child: _isLoading
+                                ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                          Colors.white),
+                                    ),
+                                  )
+                                : const Text('Save'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        if (_apiKeyController.text.isNotEmpty)
+                          OutlinedButton(
+                            onPressed: _deleteApiKey,
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.red,
+                            ),
+                            child: const Text('Delete'),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 32),
+
+            // App info
+            Text(
+              'About',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: 16),
+            Card(
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.info_outline),
+                    title: const Text('Version'),
+                    subtitle: const Text('1.1.0'),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.description_outlined),
+                    title: const Text('Privacy Policy'),
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                    onTap: () {
+                      // TODO: Open privacy policy
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 32),
+
+            // Sign out button
+            OutlinedButton(
+              onPressed: _signOut,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+              child: const Text('Sign Out'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
