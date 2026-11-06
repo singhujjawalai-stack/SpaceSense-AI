@@ -1,6 +1,12 @@
+<div align="center">
+
+<img src="mobile/assets/icon/app_icon.png" alt="SpaceSense AI logo" width="110"/>
+
 # SpaceSense AI
 
 **Turn a photo of any room into an expert design report — score, fix-it plan, and "after" previews.**
+
+</div>
 
 SpaceSense AI looks at your room, rates it across six dimensions (clutter, design, functionality, storage, lighting), and gives you an impact-ranked action plan of what to change first — plus direct product suggestions for the fixes.
 
