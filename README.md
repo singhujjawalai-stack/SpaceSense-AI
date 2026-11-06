@@ -1,86 +1,45 @@
 # SpaceSense AI
 
-**An AI-powered room analysis app that helps users optimize their living spaces.**
+**Turn a photo of any room into an expert design report — score, fix-it plan, and "after" previews.**
 
-- **Frontend**: Flutter app (Android-first)
-- **Database**: Supabase (auth only)
-- **Storage**: Local device storage (photos + analysis history)
-- **AI**: User-provided API keys (OpenAI / Anthropic / Google) — called **directly from the app**, no backend server
-- **Cost**: subscriptions/AI keys are the user's own; no server costs
+SpaceSense AI looks at your room, rates it across six dimensions (clutter, design, functionality, storage, lighting), and gives you an impact-ranked action plan of what to change first — plus direct product suggestions for the fixes.
 
-## Architecture
+- ✅ Free to use — bring your own free API key (Google Gemini works great)
+- ✅ No backend, no account-data server, no subscription
+- ✅ Photos and history stay on your phone
 
-```
-Flutter app ──── Supabase (email/password + Google sign-in)
-     │
-     └── calls AI provider directly (OpenAI / Anthropic / Google vision APIs)
-         with the user's own API key. One AI call returns the analysis:
-         room type, detected objects, scoring data, recommendations
-         (impact-ranked), and suggested products (with webshop search links).
-```
+## Features
 
-There is **no intermediary backend** — the old FastAPI proxy was removed.
-Scores are computed locally in Dart from the AI's vision data.
+- 📸 **Photo analysis** — snap a room or upload one; AI identifies the room type, objects, layout and lighting in one shot
+- 📊 **Six-dimension scoring** — overall score with a clear breakdown (clutter, design, functionality, storage, lighting)
+- 🥇 **Impact-ranked recommendations** — the changes that matter most, sorted and ranked (gold/silver/bronze) by expected improvement
+- 🛍️ **Suggested products** — what to add or replace, each with one-tap search links (Google Shopping / Amazon)
+- ✨ **Reimagine the room** — realistic "after" previews of your own photo per style: decluttered, brighter, minimalist, more storage, modern refresh
+- 🗂️ **Offline history** — every analysis and photo is saved locally on the device, viewable and shareable anytime
+- 🔑 **Bring your own AI key** — add an OpenAI, Anthropic or Google Gemini key in Settings (with a one-tap connection test); the free Gemini tier covers everyday use at no cost
 
-```
-mobile/                      # Flutter app
-├── lib/
-│   ├── main.dart
-│   ├── core/                # config, theme, network, ai (direct AI calls)
-│   ├── features/            # auth, camera, analysis, history, settings
-│   └── shared/              # models (analysis, api key, user)
-└── assets/
-```
+## Privacy
 
-Analysis results and photos are stored in local app documents storage:
+Photos are kept on your device. The only thing that leaves the phone is a base64 copy of the photo you choose to analyze, sent directly to the AI provider you configured in Settings. Nothing is stored on any server.
+
+## For Developers
+
+Flutter (Android) app; Supabase handles sign-in (email/password + Google) and everything else runs locally in Dart.
 
 ```
-<app documents>/spacesense/
-├── originals/               # room photos ({roomId}_{timestamp}.jpg)
-└── analyses/                # analysis JSON ({analysisId}.json),
-                             # links the photo via image_path
+mobile/                    # Flutter app
+└── lib/
+    ├── core/              # theme, config, AI service (direct provider calls)
+    ├── features/          # auth, camera, analysis, history, settings
+    └── shared/            # models
 ```
-
-## Setup
-
-1. **Supabase**: create a project at [supabase.com](https://supabase.com) and copy the
-   Project URL + anon/publishable key. See `SUPABASE_SETUP_CHECKLIST.md`.
-2. **Configure the app**: edit `mobile/lib/core/config/env.dart` with your
-   Supabase URL and key.
-3. **API key**: no code changes needed — users add their own OpenAI /
-   Anthropic / Google API key inside the app (Settings → API Configuration →
-   Test Connection).
-
-## Run
 
 ```bash
 cd mobile
 flutter pub get
-flutter run          # debug on a device or emulator
+flutter run               # debug on a device or emulator
+flutter build apk --release --split-per-abi   # release APKs
 ```
 
-## Build APKs
-
-```bash
-cd mobile
-flutter build apk --release --split-per-abi
-# Output: build/app/outputs/flutter-apk/
-#   app-arm64-v8a-release.apk      ← modern Android phones
-#   app-armeabi-v7a-release.apk    ← older Android phones
-#   app-x86_64-release.apk         ← emulators
-```
-
-## Features
-
-- ✅ Email/password + Google sign-in (Supabase)
-- ✅ User API key management with Test Connection
-- ✅ Camera capture + gallery upload
-- ✅ Single-call AI room analysis (6-dimension scoring, computed locally)
-- ✅ Impact-ranked recommendations (best fix first, gold/silver/bronze ranks)
-- ✅ Suggested products to add or replace, with one-tap webshop search links
-- ✅ Local photo storage + offline history with delete
-
-## Privacy
-
-Photos are processed locally on device except a base64 copy sent to the
-user's chosen AI provider for analysis. Nothing is stored server-side.
+To use your own Supabase project, set the URL and publishable key in
+`mobile/lib/core/config/env.dart` (see `SUPABASE_SETUP_CHECKLIST.md`).
