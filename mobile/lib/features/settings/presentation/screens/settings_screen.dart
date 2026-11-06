@@ -21,6 +21,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _isLoading = false;
   bool _isTesting = false;
 
+  /// Cleans a pasted key: surrounding whitespace/quotes, copy artifacts
+  /// ("key=...", "apiKey=...", "Bearer ...", "API_KEY=") and internal
+  /// line breaks. Real API keys never contain spaces, so these are safe.
+  static String _sanitizeKey(String raw) {
+    var key = raw.trim();
+    if (key.length >= 2 &&
+        ((key.startsWith('"') && key.endsWith('"')) ||
+            (key.startsWith("'") && key.endsWith("'")))) {
+      key = key.substring(1, key.length - 1).trim();
+    }
+    final prefixes = ['key=', 'apiKey=', 'apikey=', 'API_KEY=', 'Bearer '];
+    for (final p in prefixes) {
+      if (key.toLowerCase().startsWith(p.toLowerCase())) {
+        key = key.substring(p.length).trim();
+        break;
+      }
+    }
+    return key.replaceAll(RegExp(r'\s+'), '');
+  }
+
+
   @override
   void initState() {
     super.initState();
@@ -69,6 +90,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _saveApiKey() async {
+    final sanitized = _sanitizeKey(_apiKeyController.text);
     if (_selectedProvider == null || _selectedModel == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select provider and model')),
@@ -76,7 +98,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       return;
     }
 
-    if (_apiKeyController.text.trim().isEmpty) {
+    if (sanitized.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter your API key')),
       );
@@ -89,7 +111,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final apiKey = ApiKeyModel(
         provider: _selectedProvider!,
         model: _selectedModel!,
-        apiKey: _apiKeyController.text.trim(),
+        apiKey: sanitized,
       );
 
       final apiKeyService = ref.read(apiKeyServiceProvider);
@@ -116,13 +138,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   /// Validates the entered key against the AI provider directly.
   Future<void> _testApiKey() async {
+    final sanitized = _sanitizeKey(_apiKeyController.text);
     if (_selectedProvider == null || _selectedModel == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select provider and model')),
       );
       return;
     }
-    if (_apiKeyController.text.trim().isEmpty) {
+    if (sanitized.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter your API key')),
       );
@@ -135,7 +158,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final ok = await aiService.validateKey(
         provider: _selectedProvider!,
         model: _selectedModel!,
-        apiKey: _apiKeyController.text.trim(),
+        apiKey: sanitized,
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -174,6 +197,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (confirmed == true) {
       final apiKeyService = ref.read(apiKeyServiceProvider);
       await apiKeyService.deleteApiKey();
+      // Refresh the cached provider so the Home banner reappears.
+      ref.invalidate(apiKeyProvider);
       setState(() {
         _selectedProvider = null;
         _selectedModel = null;
@@ -189,7 +214,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   /// Saves (or disables when empty) the optional OpenRouter image fallback.
   Future<void> _saveOpenRouter() async {
-    final text = _openRouterController.text.trim();
+    final text = _sanitizeKey(_openRouterController.text);
     final apiKeyService = ref.read(apiKeyServiceProvider);
     if (text.isEmpty) {
       await apiKeyService.deleteOpenRouterKey();
