@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:convert';
 import '../../../../core/ai/ai_service.dart';
 import '../../../../core/utils/storage_service.dart';
@@ -231,15 +232,10 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
                                         color: Colors.green),
                                   )
                                 : active
-                                    ? const CircleAvatar(
-                                        backgroundColor:
-                                            Colors.transparent,
-                                        child: SizedBox(
-                                          width: 28,
-                                          height: 28,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2.5,
-                                          ),
+                                    ? Center(
+                                        child: _TypingDots(
+                                          color:
+                                              theme.colorScheme.primary,
                                         ),
                                       )
                                     : CircleAvatar(
@@ -309,6 +305,69 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Three staggered jumping dots (WhatsApp "typing" style) for the active
+/// step indicator.
+class _TypingDots extends StatefulWidget {
+  final Color color;
+
+  const _TypingDots({required this.color});
+
+  @override
+  State<_TypingDots> createState() => _TypingDotsState();
+}
+
+class _TypingDotsState extends State<_TypingDots>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1300),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(3, (i) {
+            // Stagger each dot so the three jump in sequence.
+            final p = ((_controller.value - i * 0.18) % 1.0 + 1.0) % 1.0;
+            final wave = math.sin(p * math.pi); // 0 -> 1 -> 0, smooth
+            final dy = -wave * 4.0;
+            final scale = 1.0 - wave * 0.3;
+            final opacity = 0.35 + wave * 0.65;
+            final color = widget.color.withValues(alpha: opacity);
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 1.5),
+              child: Transform.translate(
+                offset: Offset(0, dy),
+                child: Transform.scale(
+                  scale: scale,
+                  child: Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+        );
+      },
     );
   }
 }

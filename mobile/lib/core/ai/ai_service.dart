@@ -1027,7 +1027,10 @@ class AiException implements Exception {
             );
           default:
             return AiException(
-                'AI request failed${status != null ? ' (HTTP $status)' : ''}${detail != null ? ': $detail' : '.'}');
+              'AI request failed'
+              '${status != null ? ' (HTTP $status)' : ''}'
+              '${detail != null ? ': $detail' : ': ${e.error ?? e.message ?? 'unknown network error — try again'}.'}',
+            );
         }
     }
   }
