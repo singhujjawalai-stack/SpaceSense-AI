@@ -3,6 +3,79 @@ import 'dart:io';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../shared/models/analysis_model.dart';
+import 'reimagine_screen.dart';
+
+/// Gradient CTA card that opens the Reimagine screen (AI "after" previews).
+class _ReimagineCard extends StatelessWidget {
+  final AnalysisModel analysis;
+
+  const _ReimagineCard({required this.analysis});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final imageFile = analysis.imagePath != null
+        ? File(analysis.imagePath!)
+        : null;
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [theme.colorScheme.primary, theme.colorScheme.secondary],
+        ),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: (imageFile != null && imageFile.existsSync())
+              ? () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ReimagineScreen(
+                        imageFile: imageFile,
+                        roomName: analysis.roomName,
+                        analysisId: analysis.id,
+                      ),
+                    ),
+                  );
+                }
+              : null,
+          borderRadius: BorderRadius.circular(16),
+          child: const Padding(
+            padding: EdgeInsets.all(18.0),
+            child: Row(
+              children: [
+                Icon(Icons.auto_awesome, color: Colors.white, size: 28),
+                SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Reimagine this room',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          )),
+                      SizedBox(height: 4),
+                      Text(
+                        'See "after" previews — decluttered, brighter, minimal',
+                        style: TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right, color: Colors.white),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class ResultsScreen extends StatelessWidget {  final AnalysisModel analysis;
 
@@ -146,6 +219,10 @@ class ResultsScreen extends StatelessWidget {  final AnalysisModel analysis;
                       ),
                     ),
                   ),
+                  const SizedBox(height: 24),
+
+                  // Reimagine CTA — AI "after" previews of this room
+                  _ReimagineCard(analysis: analysis),
                   const SizedBox(height: 24),
 
                   // Overall score

@@ -16,6 +16,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String? _selectedProvider;
   String? _selectedModel;
   final _apiKeyController = TextEditingController();
+  final _openRouterController = TextEditingController();
   bool _isLoading = false;
   bool _isTesting = false;
 
@@ -28,20 +29,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void dispose() {
     _apiKeyController.dispose();
+    _openRouterController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadApiKey() async {
+    Future<void> _loadApiKey() async {
     final apiKeyService = ref.read(apiKeyServiceProvider);
     final apiKey = await apiKeyService.getApiKey();
-    if (apiKey != null && mounted) {
+    final openRouter = await apiKeyService.getOpenRouterKey();
+    if (mounted) {
       setState(() {
-        _selectedProvider = apiKey.provider;
-        // A previously saved model may have been retired by the provider
-        // (e.g. gemini-1.5). Force re-selection instead of a guaranteed 404.
-        final models = SupportedProvider.models[apiKey.provider] ?? const [];
-        _selectedModel = models.contains(apiKey.model) ? apiKey.model : null;
-        _apiKeyController.text = apiKey.apiKey;
+        if (apiKey != null) {
+          _selectedProvider = apiKey.provider;
+          // A previously saved model may have been retired by the provider
+          // (e.g. gemini-1.5). Force re-selection instead of a guaranteed 404.
+          final models = SupportedProvider.models[apiKey.provider] ?? const [];
+          _selectedModel = models.contains(apiKey.model) ? apiKey.model : null;
+          _apiKeyController.text = apiKey.apiKey;
+        }
+        if (openRouter != null) _openRouterController.text = openRouter;
       });
     }
   }
@@ -163,6 +169,34 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         );
       }
     }
+  }
+
+  /// Saves (or disables when empty) the optional OpenRouter image fallback.
+  Future<void> _saveOpenRouter() async {
+    final text = _openRouterController.text.trim();
+    final apiKeyService = ref.read(apiKeyServiceProvider);
+    if (text.isEmpty) {
+      await apiKeyService.deleteOpenRouterKey();
+    } else {
+      await apiKeyService.saveOpenRouterKey(text);
+    }
+    if (!mounted) return;
+    setState(() {}); // refresh the Clear button visibility
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+            text.isEmpty ? 'OpenRouter fallback disabled' : 'OpenRouter fallback enabled'),
+      ),
+    );
+  }
+
+  Future<void> _clearOpenRouter() async {
+    await ref.read(apiKeyServiceProvider).deleteOpenRouterKey();
+    if (!mounted) return;
+    setState(() => _openRouterController.clear());
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Fallback disabled')),
+    );
   }
 
   Future<void> _signOut() async {
@@ -365,6 +399,70 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             ),
                             child: const Text('Delete'),
                           ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 32),
+
+            // Optional OpenRouter image fallback
+            Text(
+              'Image Fallback (optional)',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'When Gemini\'s free image quota runs out, Reimagine can use a '
+              'free OpenRouter account instead. Create a free key at '
+              'openrouter.ai (no card needed) and paste it here.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+            ),
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextField(
+                      controller: _openRouterController,
+                      decoration: const InputDecoration(
+                        labelText: 'OpenRouter API key (optional)',
+                        hintText: 'sk-or-...',
+                        prefixIcon: Icon(Icons.image_outlined),
+                      ),
+                      obscureText: true,
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: _saveOpenRouter,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor:
+                                  Theme.of(context).colorScheme.primary,
+                              foregroundColor: Colors.white,
+                            ),
+                            child: const Text('Save Fallback Key'),
+                          ),
+                        ),
+                        if (_openRouterController.text.isNotEmpty) ...[
+                          const SizedBox(width: 12),
+                          OutlinedButton(
+                            onPressed: _clearOpenRouter,
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.red,
+                            ),
+                            child: const Text('Clear'),
+                          ),
+                        ],
                       ],
                     ),
                   ],

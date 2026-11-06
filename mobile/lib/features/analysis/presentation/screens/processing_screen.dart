@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import '../../../../core/ai/ai_service.dart';
@@ -31,6 +32,8 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
   bool _isProcessing = true;
   int _stage = 0; // 0 = reading image, 1 = using AI, 2 = saving results
   String? _errorMessage;
+  Timer? _timer;
+  int _elapsedSeconds = 0;
 
   static const List<Map<String, dynamic>> _steps = [
     {'icon': Icons.image_outlined, 'label': 'Reading'},
@@ -41,7 +44,29 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
   @override
   void initState() {
     super.initState();
+    _startTimer();
     _processImage();
+  }
+
+  void _startTimer() {
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && _isProcessing) {
+        setState(() => _elapsedSeconds += 1);
+      }
+    });
+  }
+
+  String get _elapsedLabel {
+    final m = _elapsedSeconds ~/ 60;
+    final s = _elapsedSeconds % 60;
+    if (m == 0) return 'Elapsed ${s}s';
+    return 'Elapsed ${m}m ${s}s';
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
   }
 
   Future<void> _processImage() async {
@@ -184,7 +209,8 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
                     final step = _steps[i];
                     final done = _isProcessing && i < _stage;
                     final active = _isProcessing && i == _stage;
-                    final color = done
+                    final label = step['label'] as String;
+                    final labelColor = done
                         ? Colors.green
                         : active
                             ? theme.colorScheme.primary
@@ -194,12 +220,43 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       child: Column(
                         children: [
-                          Icon(step['icon'] as IconData, color: color),
+                          SizedBox(
+                            width: 40,
+                            height: 40,
+                            child: done
+                                ? const CircleAvatar(
+                                    backgroundColor:
+                                        Colors.transparent,
+                                    child: Icon(Icons.check_circle,
+                                        color: Colors.green),
+                                  )
+                                : active
+                                    ? const CircleAvatar(
+                                        backgroundColor:
+                                            Colors.transparent,
+                                        child: SizedBox(
+                                          width: 28,
+                                          height: 28,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2.5,
+                                          ),
+                                        ),
+                                      )
+                                    : CircleAvatar(
+                                        backgroundColor:
+                                            Colors.transparent,
+                                        child: Icon(
+                                          step['icon'] as IconData,
+                                          color: theme
+                                              .colorScheme.outlineVariant,
+                                        ),
+                                      ),
+                          ),
                           const SizedBox(height: 6),
                           Text(
-                            step['label'] as String,
+                            label,
                             style: theme.textTheme.bodySmall?.copyWith(
-                              color: color,
+                              color: labelColor,
                               fontWeight:
                                   active ? FontWeight.w700 : FontWeight.w500,
                             ),
@@ -221,7 +278,14 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
                 if (_isProcessing) ...[
                   const SizedBox(height: 12),
                   Text(
-                    'This usually takes 15–30 seconds',
+                    _elapsedLabel,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Text(
+                    'This usually takes 30–60 seconds',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.outline,
                     ),

@@ -5,6 +5,7 @@ import '../../../shared/models/api_key_model.dart';
 
 class ApiKeyService {
   static const String _apiKeyKey = 'user_api_key';
+  static const String _openRouterKey = 'openrouter_api_key';
 
   Future<void> saveApiKey(ApiKeyModel apiKey) async {
     final prefs = await SharedPreferences.getInstance();
@@ -28,6 +29,23 @@ class ApiKeyService {
   Future<bool> hasApiKey() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.containsKey(_apiKeyKey);
+  }
+
+  /// Optional OpenRouter key — enables free-tier IMAGE generation fallback
+  /// (e.g. Nano Banana ":free" variants) via openrouter.ai.
+  Future<void> saveOpenRouterKey(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_openRouterKey, key);
+  }
+
+  Future<String?> getOpenRouterKey() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_openRouterKey);
+  }
+
+  Future<void> deleteOpenRouterKey() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_openRouterKey);
   }
 }
 

@@ -43,6 +43,53 @@ class StorageService {
     }
   }
 
+  // Save re-imagined ("after") image produced by the AI
+  Future<String> saveReimaginedImage(
+    List<int> bytes,
+    String analysisId,
+    int index, {
+    String extension = 'jpg',
+  }) async {
+    try {
+      final appDir = await _appDocDir;
+      final dir = Directory('${appDir.path}/spacesense/reimagined');
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      final fileName = '${analysisId}_reimagined_$index.$extension';
+      final file = File('${dir.path}/$fileName');
+      await file.writeAsBytes(bytes);
+      _logger.d('Saved reimagined image: ${file.path}');
+      return file.path;
+    } catch (e) {
+      _logger.e('Error saving reimagined image: $e');
+      rethrow;
+    }
+  }
+
+  // List saved re-imagined images for an analysis (styleIndex -> file path).
+  Future<Map<int, String>> getReimaginedImages(String analysisId) async {
+    try {
+      final appDir = await _appDocDir;
+      final dir = Directory('${appDir.path}/spacesense/reimagined');
+      if (!await dir.exists()) return {};
+      final pattern =
+          RegExp('^${RegExp.escape(analysisId)}_reimagined_(\\d+)\\.');
+      final map = <int, String>{};
+      for (final f in dir.listSync()) {
+        final name = f.path.split(Platform.pathSeparator).last;
+        final m = pattern.firstMatch(name);
+        if (m != null) {
+          map[int.parse(m.group(1)!)] = f.path;
+        }
+      }
+      return map;
+    } catch (e) {
+      _logger.e('Error listing reimagined images: $e');
+      return {};
+    }
+  }
+
   // Save analysis JSON
   Future<String> saveAnalysis(Map<String, dynamic> analysisData, String analysisId) async {
     try {

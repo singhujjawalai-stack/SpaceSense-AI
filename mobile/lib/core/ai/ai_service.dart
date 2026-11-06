@@ -25,6 +25,280 @@ class AiService {
 
   static const int _maxTokens = 4096;
 
+  /// Preferred order of free image-generation ("Nano Banana") models.
+  /// 2.5-flash-image historically has the largest free daily quota; 3.x
+  /// image models are newer with smaller allowances, and pro models are last.
+  static const List<String> _googleImagePreferred = [
+    'gemini-2.5-flash-image',
+    'gemini-3.1-flash-image',
+    'gemini-3.1-flash-image-preview',
+    'gemini-3-pro-image',
+    'gemini-3-pro-image-preview',
+    'nano-banana-pro-preview',
+  ];
+
+  /// Image-capable Gemini models available to this key.
+  Future<List<String>> listGoogleImageModels(String apiKey) async {
+    final all = await listGoogleModels(apiKey);
+    return all
+        .where((n) => n.contains('image') || n.contains('banana'))
+        .toList();
+  }
+
+  /// Generates ONE re-imagined photo of the room for a single parameter
+  /// (e.g. "less cluttered"), backed by this key's image models.
+  /// Returns base64 image data.
+  Future<String> reimagineRoom({
+    required String imageBase64,
+    required String roomName,
+    required String parameter,
+    required String apiKey,
+    String? openRouterKey,
+  }) async {
+    final available = await listGoogleImageModels(apiKey);
+    if (available.isEmpty) {
+      throw const AiException(
+        'This API key cannot use Gemini image-generation models. '
+        'Reimagining requires Nano Banana (Gemini image) models.',
+      );
+    }
+    final tried = <String>{};
+    AiException? lastError;
+    var rateLimited = 0;
+    // Preferred models first, then any other image models the key offers.
+    final order = [
+      ..._googleImagePreferred.where(available.contains),
+      ...available.where((m) => !_googleImagePreferred.contains(m)),
+    ];
+    for (final model in order.take(3)) {
+      if (tried.contains(model)) continue;
+      tried.add(model);
+      try {
+        return await _callGoogleImage(
+          imageBase64: imageBase64,
+          roomName: roomName,
+          parameter: parameter,
+          model: model,
+          apiKey: apiKey,
+        );
+      } on AiException catch (e) {
+        lastError = e;
+        final isRate = e.message.contains('Rate limit');
+        if (isRate) rateLimited++;
+        // Try the next image model on 404s (model not for new users) and on
+        // 429s (models have separate free-tier quotas).
+        final transient = e.message.contains('404') ||
+            e.message.contains('not found') ||
+            e.message.contains('no longer available') ||
+            isRate;
+        if (!transient) rethrow;
+      }
+    }
+    if (rateLimited > 0 && rateLimited == tried.length) {
+      // Free-tier Google image quota exhausted — try the optional
+      // free OpenRouter route (:free Nano Banana variants) before giving up.
+      if (openRouterKey != null && openRouterKey.trim().isNotEmpty) {
+        // Includes Google's key as the context image input for the edit.
+        return await _reimagineViaOpenRouter(
+          imageBase64: imageBase64,
+          roomName: roomName,
+          parameter: parameter,
+          openRouterKey: openRouterKey,
+        );
+      }
+      throw const AiException(
+        'Free-tier image quota is exhausted for today on all available '
+        'models. It resets around midnight Pacific time. Room analysis is '
+        'on a separate quota and keeps working at no cost. Optional: add a '
+        'free OpenRouter key for extra image generations.',
+      );
+    }
+    throw lastError ??
+        const AiException('Image generation failed. Please try again.');
+  }
+
+  Future<String> _callGoogleImage({
+    required String imageBase64,
+    required String roomName,
+    required String parameter,
+    required String model,
+    required String apiKey,
+  }) async {
+    final prompt =
+        'Edit this photo of the room "$roomName" as an expert interior '
+        'designer. Apply exactly this transformation: $parameter.\n'
+        'Keep the same room, same camera angle, same walls, windows, doors '
+        'and floor plan. Only change what the transformation requires so the '
+        'photo looks like a realistic "after" snapshot of the same space.\n'
+        'Return only the edited image.';
+
+    try {
+      final res = await _dio.post(
+        'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent',
+        queryParameters: {'key': apiKey},
+        options: Options(receiveTimeout: const Duration(seconds: 120)),
+        data: {
+          'contents': [
+            {
+              'role': 'user',
+              'parts': [
+                {
+                  'inline_data': {
+                    'mime_type': 'image/jpeg',
+                    'data': imageBase64,
+                  },
+                },
+                {'text': prompt},
+              ],
+            },
+          ],
+        },
+      );
+      final candidates = res.data['candidates'] as List?;
+      if (candidates == null || candidates.isEmpty) {
+        throw const AiException(
+            'The image model returned no result. Try again.');
+      }
+      final parts = candidates[0]['content']['parts'] as List?;
+      if (parts == null) {
+        throw const AiException(
+            'The image model returned no result. Try again.');
+      }
+      for (final p in parts) {
+        final inline = p['inlineData'] ?? p['inline_data'];
+        final data = inline is Map ? inline['data'] : null;
+        if (data is String && data.isNotEmpty) return data;
+      }
+      throw const AiException(
+          'The image model returned no image (it may have been blocked by '
+          'safety filters). Try again or reword the transformation.');
+    } on DioException catch (e) {
+      throw AiException.fromDio(e);
+    }
+  }
+
+  static const String _openRouterModelsUrl =
+      'https://openrouter.ai/api/v1/models';
+
+  /// Queries OpenRouter's live catalog for available free image-generation
+  /// models. Returns slugs (e.g. 'google/gemini-2.5-flash-image:free').
+  Future<List<String>> listOpenRouterImageModels() async {
+    final res = await _dio.get(_openRouterModelsUrl);
+    final data = res.data['data'] as List?;
+    if (data == null) return const [];
+    final models = <String>[];
+    for (final m in data) {
+      if (m is! Map) continue;
+      final id = m['id'] as String? ?? '';
+      if (!id.endsWith(':free')) continue;
+      final arch = m['architecture'];
+      final output = arch is Map
+          ? ((arch['output_modalities'] as List?) ?? [])
+              .map((e) => e.toString())
+          : const <String>[];
+      if (output.contains('image')) models.add(id);
+    }
+    return models;
+  }
+
+  /// Free image generation via openrouter.ai (no key needed by Google).
+  /// Uses chat-completions with an image + instruction, reading the
+  /// generated image out of the assistant message.
+  Future<String> _reimagineViaOpenRouter({
+    required String imageBase64,
+    required String roomName,
+    required String parameter,
+    required String openRouterKey,
+  }) async {
+    final prompt = 'Edit this photo of the room "$roomName" as an expert '
+        'interior designer. Apply exactly this transformation: $parameter.\n'
+        'Keep the same room, same camera angle, same walls, windows, doors '
+        'and floor plan. Only change what the transformation requires so the '
+        'photo looks like a realistic "after" snapshot of the same space.\n'
+        'Return only the edited image.';
+
+    List<String> models;
+    try {
+      models = await listOpenRouterImageModels();
+    } on DioException {
+      models = const [];
+    }
+    AiException? lastError;
+    for (final model in models.take(3)) {
+      try {
+        final res = await _dio.post(
+          'https://openrouter.ai/api/v1/chat/completions',
+          options: Options(
+            receiveTimeout: const Duration(seconds: 120),
+            headers: {
+              'Authorization': 'Bearer $openRouterKey',
+              'Content-Type': 'application/json',
+            },
+          ),
+          data: {
+            'model': model,
+            'messages': [
+              {
+                'role': 'user',
+                'content': [
+                  {
+                    'type': 'image_url',
+                    'image_url': {
+                      'url': 'data:image/jpeg;base64,$imageBase64',
+                    },
+                  },
+                  {'type': 'text', 'text': prompt},
+                ],
+              },
+            ],
+          },
+        );
+        final message = res.data['choices']?[0]?['message'];
+        final images = message?['images'];
+        // messages.images: [{type: 'image_url', image_url: {url: data:...;base64,...}}]
+        if (images is List) {
+          for (final img in images) {
+            final url = img is Map
+                ? (img['image_url'] is Map
+                    ? img['image_url']['url']
+                    : img['url'])
+                : null;
+            if (url is String && url.contains('base64,')) {
+              return url.split('base64,').last;
+            }
+          }
+        }
+        // Some models inline the data URL inside content instead.
+        final content = message?['content'];
+        if (content is String && content.contains('base64,')) {
+          return content.split('base64,').last.replaceAll(
+              RegExp(r'[^A-Za-z0-9+/=]'), '');
+        }
+        lastError = const AiException(
+            'OpenRouter returned no image (possibly blocked or the free '
+            'variant is unavailable).');
+      } on AiException catch (e) {
+        lastError = e;
+        // Dead/ranked-out free variants are common — try the next one.
+        continue;
+      } on DioException catch (e) {
+        lastError = AiException.fromDio(e);
+        // 404/429 → next variant; auth errors stop the chain.
+        final msg = lastError.message;
+        final transient = msg.contains('404') ||
+            msg.contains('not found') ||
+            msg.contains('Rate limit');
+        if (!transient) rethrow;
+      }
+    }
+    throw lastError ??
+        const AiException(
+            'OpenRouter currently serves no free image-generation models '
+            '(its image models became paid-only). Google\'s free quota '
+            'resets around midnight Pacific time — that remains your '
+            'no-cost route.');
+  }
+
   /// Result of a full room analysis (everything the app needs).
   /// The returned map matches AnalysisModel.fromJson, plus it contains
   /// the raw vision fields under 'vision' for future use.
@@ -42,6 +316,7 @@ class AiService {
     _logger.d('Starting direct AI analysis with $provider/$model');
 
     try {
+      String? googleUsedModel;
       final String contentText = switch (provider) {
         'openai' => await _callOpenai(
             imageBase64: imageBase64,
@@ -60,6 +335,7 @@ class AiService {
             prompt: prompt,
             model: model,
             apiKey: apiKey,
+            onModelUsed: (m) => googleUsedModel = m,
           ),
         _ => throw AiException('Unsupported provider: $provider'),
       };
@@ -129,7 +405,7 @@ class AiService {
         'recommendations': recommendations,
         'processing_time_ms': stopwatch.elapsedMilliseconds,
         'ai_provider': provider,
-        'ai_model': model,
+        'ai_model': googleUsedModel ?? model,
         'vision': {
           'spatial_analysis': vision['spatial_analysis'] ?? {},
           'storage_areas': vision['storage_areas'] ?? [],
@@ -279,14 +555,18 @@ class AiService {
   }
 
   /// Preferred order for free-tier Gemini models (best -> cheapest).
+  /// gemini-3.x-flash models are the current free-tier generation;
+  /// gemini-2.5-flash is still listed by old keys but 404s for new users.
   static const List<String> _googlePreferred = [
+    'gemini-3.8-flash',
+    'gemini-3.7-flash',
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
     'gemini-2.5-flash',
     'gemini-2.5-flash-lite',
-    'gemini-flash-latest',
     'gemini-2.0-flash',
     'gemini-2.0-flash-lite',
     'gemini-1.5-flash',
-    'gemini-2.5-pro',
   ];
 
   /// Queries Google's free ListModels endpoint for what THIS key can use.
@@ -338,22 +618,30 @@ class AiService {
   }
 
   /// Google call with automatic model fallback: if the selected model isn't
-  /// available for this key, retries with the best model the key offers.
+  /// accepted by this key, retries with the best model the key offers.
+  /// Reports the model that actually succeeded via [onModelUsed].
   Future<String> _callGoogleWithFallback({
     required String imageBase64,
     required String prompt,
     required String model,
     required String apiKey,
+    void Function(String usedModel)? onModelUsed,
   }) async {
-    String current = model;
-    for (var attempt = 0; attempt < 2; attempt++) {
+    String current = model.trim();
+    if (current.startsWith('models/')) {
+      current = current.substring('models/'.length);
+    }
+    final tried = <String>{current};
+    for (var attempt = 0; attempt < 4; attempt++) {
       try {
-        return await _callGoogle(
+        final text = await _callGoogle(
           imageBase64: imageBase64,
           prompt: prompt,
           model: current,
           apiKey: apiKey,
         );
+        onModelUsed?.call(current);
+        return text;
       } on AiException catch (e) {
         final isModelMissing =
             e.message.contains('404') || e.message.contains('not found');
@@ -361,15 +649,26 @@ class AiService {
 
         final available = await listGoogleModels(apiKey);
         if (available.isEmpty) rethrow;
-        if (!available.contains(current)) {
-          final best = _googlePreferred
-              .firstWhere(available.contains, orElse: () => available.first);
-          _logger.w(
-              "Model '$current' unavailable for this key; falling back to '$best'");
-          current = best;
-          continue;
+
+        // Pick the best available model not yet tried.
+        final candidates = _googlePreferred.where(available.contains).toList();
+        if (candidates.isEmpty) candidates.addAll(available);
+        String? next;
+        for (final c in candidates) {
+          if (!tried.contains(c)) {
+            next = c;
+            break;
+          }
         }
-        rethrow;
+        next ??= available.where((m) => !tried.contains(m)).firstOrNull;
+        if (next == null) {
+          // Every available model has been tried — surface the raw reason.
+          rethrow;
+        }
+        _logger.w("Model '$current' failed (404); falling back to '$next'");
+        tried.add(next);
+        current = next;
+        continue;
       }
     }
     throw AiException(
@@ -713,15 +1012,18 @@ class AiException implements Exception {
               'Invalid or unauthorized API key. Please check your API key in Settings.',
             );
           case 429:
-            return const AiException(
-              'Rate limit exceeded on your AI provider account. Please wait a moment and try again.',
+            return AiException(
+              'Rate limit reached on the free tier. Please wait a minute and '
+              'try again — quotas reset after a short wait and daily.'
+              '${detail != null ? '\n\nDetails: $detail' : ''}',
             );
           case 413:
             return const AiException('The photo is too large. Try a smaller one.');
           case 404:
-            return const AiException(
-              'Model not found (404) — the model you selected may have been '
-              'retired by the provider. Open Settings and pick a newer model.',
+            return AiException(
+              'Model not found (404) — ${detail ?? 'the model you selected may '
+                  'have been retired by the provider. Open Settings and pick a '
+                  'newer model.'}',
             );
           default:
             return AiException(
