@@ -30,10 +30,11 @@ class SupportedProvider {
   static const String openai = 'openai';
   static const String anthropic = 'anthropic';
   static const String google = 'google';
+  static const String openrouter = 'openrouter';
 
-  /// Ordered with Google first — it's the only provider with a genuinely
-  /// free API tier; the others are strictly pay-per-use.
-  static List<String> get all => [google, openai, anthropic];
+  /// Ordered by free-friendliness: Google and OpenRouter have genuinely
+  /// free tiers; the others are strictly pay-per-use.
+  static List<String> get all => [google, openrouter, openai, anthropic];
 
   static Map<String, List<String>> get models => {
         openai: ['gpt-4o', 'gpt-4o-mini'],
@@ -46,13 +47,36 @@ class SupportedProvider {
           'gemini-2.5-flash',
           'gemini-2.5-flash-lite',
         ],
+        openrouter: [
+          'nvidia/nemotron-3.5-super-vl:free',
+          'google/gemma-4-26b-a4b-it:free',
+          'dots-studio/dots-3-note-preview:free',
+        ],
       };
+
+  /// Where the user creates an API key for this provider.
+  static String? consoleUrl(String provider) {
+    switch (provider) {
+      case google:
+        return 'https://aistudio.google.com/apikey';
+      case openrouter:
+        return 'https://openrouter.ai/settings/keys';
+      case openai:
+        return 'https://platform.openai.com/api-keys';
+      case anthropic:
+        return 'https://console.anthropic.com/settings/keys';
+      default:
+        return null;
+    }
+  }
 
   /// Human-friendly hint shown in Settings for each provider.
   static String? hint(String provider) {
     switch (provider) {
       case google:
         return 'Free tier available — \$0 charges, rate-limited';
+      case openrouter:
+        return 'Free ":free" models — \$0 charges, tight daily limits';
       case openai:
         return 'Pay per request from prepaid credits';
       case anthropic:

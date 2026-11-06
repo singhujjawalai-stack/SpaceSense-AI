@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../auth/data/auth_service.dart';
 import '../../../settings/data/api_key_service.dart';
 import '../../../../core/ai/ai_service.dart';
@@ -33,7 +34,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     super.dispose();
   }
 
-    Future<void> _loadApiKey() async {
+    String _selectedProviderDisplay(String provider) {
+    switch (provider) {
+      case SupportedProvider.google:
+        return 'Google AI Studio';
+      case SupportedProvider.openrouter:
+        return 'OpenRouter';
+      case SupportedProvider.openai:
+        return 'OpenAI';
+      case SupportedProvider.anthropic:
+        return 'Anthropic';
+      default:
+        return provider;
+    }
+  }
+
+  Future<void> _loadApiKey() async {
     final apiKeyService = ref.read(apiKeyServiceProvider);
     final apiKey = await apiKeyService.getApiKey();
     final openRouter = await apiKeyService.getOpenRouterKey();
@@ -318,7 +334,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           ],
                         ),
                       ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
                     if (_selectedProvider != null)
                       DropdownButtonFormField<String>(
                         value: _selectedModel,
@@ -337,7 +353,47 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           setState(() => _selectedModel = value);
                         },
                       ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
+                    if (_selectedProvider != null &&
+                        SupportedProvider.consoleUrl(_selectedProvider!) !=
+                            null)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: InkWell(
+                          onTap: () => launchUrl(
+                            Uri.parse(
+                                SupportedProvider.consoleUrl(_selectedProvider!)!),
+                            mode: LaunchMode.externalApplication,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.open_in_new,
+                                    size: 16,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primary),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Create an API key on '
+                                  '${_selectedProviderDisplay(_selectedProvider!)}',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primary,
+                                    decoration: TextDecoration.underline,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: 14),
                     TextField(
                       controller: _apiKeyController,
                       decoration: const InputDecoration(

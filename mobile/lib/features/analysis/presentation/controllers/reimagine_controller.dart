@@ -226,6 +226,7 @@ class ReimagineController extends StateNotifier<ReimagineGlobalState> {
             imageBase64: base64Image,
             roomName: roomName,
             parameter: style.transformation,
+            provider: apiKey.provider,
             apiKey: apiKey.apiKey,
             openRouterKey: openRouterKey,
           );

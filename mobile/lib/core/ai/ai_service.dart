@@ -46,16 +46,55 @@ class AiService {
   }
 
   /// Generates ONE re-imagined photo of the room for a single parameter
-  /// (e.g. "less cluttered"), backed by this key's image models.
+  /// (e.g. "less cluttered"). Routes by provider: Google keys use Gemini
+  /// image models; OpenRouter keys use OpenRouter's free image variants.
   /// Returns base64 image data.
   Future<String> reimagineRoom({
     required String imageBase64,
     required String roomName,
     required String parameter,
+    required String provider,
     required String apiKey,
     String? openRouterKey,
   }) async {
-    final available = await listGoogleImageModels(apiKey);
+    // Optional OpenRouter fallback key (or the analysis key itself when the
+    // main provider IS OpenRouter).
+    final orKey = (openRouterKey != null && openRouterKey.trim().isNotEmpty)
+        ? openRouterKey.trim()
+        : (provider == 'openrouter' ? apiKey.trim() : '');
+
+    if (provider == 'openrouter') {
+      if (orKey.isEmpty) {
+        throw const AiException(
+            'No OpenRouter key available for image generation. Add one in '
+            'Settings → Image Fallback.');
+      }
+      return await _reimagineViaOpenRouter(
+        imageBase64: imageBase64,
+        roomName: roomName,
+        parameter: parameter,
+        openRouterKey: orKey,
+      );
+    }
+    if (provider != 'google') {
+      throw const AiException(
+          'Image generation is only available with Google (Gemini image '
+          'models) or OpenRouter keys today.');
+    }
+
+    final googleKey = apiKey.trim();
+    if (googleKey.isEmpty) {
+      throw const AiException(
+          'No Google API key configured. Add one in Settings → API '
+          'Configuration, or set an OpenRouter fallback key.');
+    }
+
+    List<String> available;
+    try {
+      available = await listGoogleImageModels(googleKey);
+    } on DioException catch (e) {
+      throw AiException.fromDio(e);
+    }
     if (available.isEmpty) {
       throw const AiException(
         'This API key cannot use Gemini image-generation models. '
@@ -79,7 +118,7 @@ class AiService {
           roomName: roomName,
           parameter: parameter,
           model: model,
-          apiKey: apiKey,
+          apiKey: googleKey,
         );
       } on AiException catch (e) {
         lastError = e;
@@ -97,13 +136,12 @@ class AiService {
     if (rateLimited > 0 && rateLimited == tried.length) {
       // Free-tier Google image quota exhausted — try the optional
       // free OpenRouter route (:free Nano Banana variants) before giving up.
-      if (openRouterKey != null && openRouterKey.trim().isNotEmpty) {
-        // Includes Google's key as the context image input for the edit.
+      if (orKey.isNotEmpty) {
         return await _reimagineViaOpenRouter(
           imageBase64: imageBase64,
           roomName: roomName,
           parameter: parameter,
-          openRouterKey: openRouterKey,
+          openRouterKey: orKey,
         );
       }
       throw const AiException(
@@ -283,12 +321,15 @@ class AiService {
         continue;
       } on DioException catch (e) {
         lastError = AiException.fromDio(e);
-        // 404/429 → next variant; auth errors stop the chain.
+        // Dead variants, quota caps, and models that reject our payload all
+        // happen often enough — hop to the next free variant.
         final msg = lastError.message;
         final transient = msg.contains('404') ||
             msg.contains('not found') ||
-            msg.contains('Rate limit');
-        if (!transient) rethrow;
+            msg.contains('Rate limit') ||
+            msg.contains('(HTTP 400)') ||
+            msg.contains('(HTTP 429)');
+        if (!transient) throw lastError; // wrapped, never raw
       }
     }
     throw lastError ??
@@ -325,6 +366,12 @@ class AiService {
             apiKey: apiKey,
           ),
         'anthropic' => await _callAnthropic(
+            imageBase64: imageBase64,
+            prompt: prompt,
+            model: model,
+            apiKey: apiKey,
+          ),
+        'openrouter' => await _callOpenrouterText(
             imageBase64: imageBase64,
             prompt: prompt,
             model: model,
@@ -470,6 +517,15 @@ class AiService {
           );
           return res.statusCode == 200;
 
+        case 'openrouter':
+          // /models is public — it would accept any key. /key requires the
+          // real key and echoes its identity.
+          final res = await _dio.get(
+            'https://openrouter.ai/api/v1/key',
+            options: Options(headers: {'Authorization': 'Bearer $apiKey'}),
+          );
+          return res.statusCode == 200;
+
         default:
           return false;
       }
@@ -552,6 +608,47 @@ class AiService {
       },
     );
     return (res.data['content'][0]['text'] ?? '') as String;
+  }
+
+  /// Room analysis through OpenRouter's free (`:free`) chat models.
+  Future<String> _callOpenrouterText({
+    required String imageBase64,
+    required String prompt,
+    required String model,
+    required String apiKey,
+  }) async {
+    try {
+      final res = await _dio.post(
+        'https://openrouter.ai/api/v1/chat/completions',
+        options: Options(headers: {'Authorization': 'Bearer $apiKey'}),
+        data: {
+          'model': model,
+          'max_tokens': _maxTokens,
+          'temperature': 0.1,
+          'response_format': {'type': 'json_object'},
+          'messages': [
+            {
+              'role': 'user',
+              'content': [
+                {
+                  'type': 'image_url',
+                  'image_url': {'url': 'data:image/jpeg;base64,$imageBase64'},
+                },
+                {'type': 'text', 'text': prompt},
+              ],
+            },
+          ],
+        },
+      );
+      final choices = res.data['choices'] as List?;
+      if (choices == null || choices.isEmpty) {
+        throw const AiException('The model returned an empty response.');
+      }
+      final content = choices[0]['message']?['content'];
+      return content is String ? content : '';
+    } on DioException catch (e) {
+      throw AiException.fromDio(e);
+    }
   }
 
   /// Preferred order for free-tier Gemini models (best -> cheapest).
