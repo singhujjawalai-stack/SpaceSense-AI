@@ -128,8 +128,31 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
         roomId,
       );
 
-      // Update analysis with image path
-      final updatedAnalysis = analysis.copyWith(imagePath: imagePath);
+      // Save analysis JSON.
+      // Progress tracking: before this scan is written, compare its overall
+      // score against the latest saved analysis of the same room name. That
+      // delta (points vs the last visit) displays as a badge in results and
+      // history — turning rescans into visible progress.
+      int? scoreDelta;
+      try {
+        final existing = await storageService.getAllAnalyses();
+        final sameName = existing
+            .where((a) => ((a['room_name'] ?? '') as String).trim() ==
+                widget.roomName.trim());
+        final previous = sameName.isNotEmpty ? sameName.first : null;
+        if (previous != null && previous['scores'] is Map) {
+          final prevOverall =
+              (((previous['scores'] as Map)['overall'] ?? 0) as num).toInt();
+          scoreDelta = analysis.scores.overall - prevOverall;
+        }
+      } catch (_) {
+        // Progress tracking is best-effort; never block the save.
+      }
+
+      final updatedAnalysis = analysis.copyWith(
+        imagePath: imagePath,
+        scoreDelta: scoreDelta,
+      );
 
       // Save analysis JSON
       await storageService.saveAnalysis(

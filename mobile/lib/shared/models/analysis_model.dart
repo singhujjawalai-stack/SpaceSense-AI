@@ -170,6 +170,10 @@ class AnalysisModel {
   final String aiProvider;
   final String aiModel;
   final String? imagePath;
+  /// Overall-score change versus the user's previous analysis of the same
+  /// room. Null on the room's first scan (nothing to compare). Positive =
+  /// improved after acting on earlier recommendations.
+  final int? scoreDelta;
 
   AnalysisModel({
     required this.id,
@@ -186,6 +190,7 @@ class AnalysisModel {
     required this.aiProvider,
     required this.aiModel,
     this.imagePath,
+    this.scoreDelta,
   });
 
   factory AnalysisModel.fromJson(Map<String, dynamic> json) {
@@ -222,6 +227,7 @@ class AnalysisModel {
       aiProvider: (json['ai_provider'] ?? 'unknown') as String,
       aiModel: (json['ai_model'] ?? 'unknown') as String,
       imagePath: json['image_path'] as String?,
+      scoreDelta: (json['score_delta'] as num?)?.toInt(),
     );
   }
 
@@ -241,10 +247,11 @@ class AnalysisModel {
       'ai_provider': aiProvider,
       'ai_model': aiModel,
       'image_path': imagePath,
+      'score_delta': scoreDelta,
     };
   }
 
-  AnalysisModel copyWith({String? imagePath}) {
+  AnalysisModel copyWith({String? imagePath, int? scoreDelta}) {
     return AnalysisModel(
       id: id,
       roomId: roomId,
@@ -260,6 +267,7 @@ class AnalysisModel {
       aiProvider: aiProvider,
       aiModel: aiModel,
       imagePath: imagePath ?? this.imagePath,
+      scoreDelta: scoreDelta ?? this.scoreDelta,
     );
   }
 }

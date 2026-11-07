@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../../shared/models/analysis_model.dart';
 import 'reimagine_screen.dart';
@@ -92,32 +93,6 @@ class ResultsScreen extends StatelessWidget {  final AnalysisModel analysis;
     if (score >= 60) return 'Good';
     if (score >= 40) return 'Needs work';
     return 'Poor';
-  }
-
-  Color _getCategoryColor(String category) {
-    switch (category) {
-      case 'layout':
-        return const Color(0xFF6366F1);
-      case 'organization':
-        return const Color(0xFF0EA5E9);
-      default:
-        return const Color(0xFF8B5CF6);
-    }
-  }
-
-  String _getBudgetIcon(String tier) {
-    switch (tier) {
-      case 'free':
-        return '💡';
-      case 'low':
-        return '💵';
-      case 'medium':
-        return '💰';
-      case 'premium':
-        return '💎';
-      default:
-        return '💡';
-    }
   }
 
   void _shareSummary(BuildContext context) {
@@ -281,6 +256,54 @@ class ResultsScreen extends StatelessWidget {  final AnalysisModel analysis;
                               .bodySmall
                               ?.copyWith(color: Colors.grey[500]),
                         ),
+
+                        // Progress vs the previous scan of this room
+                        if (analysis.scoreDelta != null &&
+                            analysis.scoreDelta != 0) ...[
+                          const SizedBox(height: 10),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: (analysis.scoreDelta! > 0
+                                      ? Colors.green
+                                      : Colors.red)
+                                  .withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: (analysis.scoreDelta! > 0
+                                        ? Colors.green
+                                        : Colors.red)
+                                    .withValues(alpha: 0.5),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  analysis.scoreDelta! > 0
+                                      ? Icons.trending_up
+                                      : Icons.trending_down,
+                                  size: 16,
+                                  color: analysis.scoreDelta! > 0
+                                      ? Colors.green
+                                      : Colors.red,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  '${analysis.scoreDelta! > 0 ? '+' : ''}${analysis.scoreDelta} pts vs last scan',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: analysis.scoreDelta! > 0
+                                        ? Colors.green[700]
+                                        : Colors.red[700],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -377,117 +400,9 @@ class ResultsScreen extends StatelessWidget {  final AnalysisModel analysis;
                     const SizedBox(height: 32),
                   ],
 
-                  // Recommendations
-                  Text(
-                    'Recommendations',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Ranked by expected impact on your room',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.outline,
-                        ),
-                  ),
-                  const SizedBox(height: 16),
-                  ...([...analysis.recommendations]
-                        ..sort((a, b) => b.impact.compareTo(a.impact)))
-                      .asMap()
-                      .entries
-                      .map((entry) {
-                    final rank = entry.key + 1;
-                    final rec = entry.value;
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 16),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                _buildRankBadge(context, rank),
-                                const SizedBox(width: 12),
-                                Text(
-                                  _getBudgetIcon(rec.budgetTier),
-                                  style: const TextStyle(fontSize: 24),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    rec.title,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium
-                                        ?.copyWith(
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                  ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: _getCategoryColor(rec.category)
-                                        .withOpacity(0.12),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(
-                                    rec.category.toUpperCase(),
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                      color: _getCategoryColor(rec.category),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              rec.description,
-                              style: Theme.of(context).textTheme.bodyMedium,
-                            ),
-                            if (rec.reasoning.isNotEmpty) ...[
-                              const SizedBox(height: 8),
-                              Text(
-                                rec.reasoning,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .outline,
-                                      fontStyle: FontStyle.italic,
-                                    ),
-                              ),
-                            ],
-                            const SizedBox(height: 12),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                _buildImpactChip(context, rec.impact),
-                                _buildMiniChip(
-                                  context,
-                                  icon: Icons.payments_outlined,
-                                  label: rec.estimatedCost,
-                                ),
-                                _buildMiniChip(
-                                  context,
-                                  icon: Icons.fitness_center_outlined,
-                                  label: rec.difficulty,
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }).toList(),
+                  // Recommendations — interactive action plan with a
+                  // projected score gain for completing the checked steps.
+                  _RecommendationsPlan(analysis: analysis),
                   const SizedBox(height: 16),
 
                   // Analysis metadata
@@ -522,93 +437,6 @@ class ResultsScreen extends StatelessWidget {  final AnalysisModel analysis;
                 ],
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Gold / silver / bronze for the top 3, neutral grey after that.
-  Color _rankColor(int rank) {
-    switch (rank) {
-      case 1:
-        return const Color(0xFFF59E0B); // amber (gold)
-      case 2:
-        return const Color(0xFF94A3B8); // slate (silver)
-      case 3:
-        return const Color(0xFFB45309); // bronze
-      default:
-        return const Color(0xFF64748B); // neutral slate
-    }
-  }
-
-  Widget _buildRankBadge(BuildContext context, int rank) {
-    final color = _rankColor(rank);
-    return Container(
-      width: 34,
-      height: 34,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: color.withOpacity(0.15),
-        border: Border.all(color: color, width: 1.5),
-      ),
-      child: Text(
-        '$rank',
-        style: TextStyle(
-          fontSize: 15,
-          fontWeight: FontWeight.bold,
-          color: color,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildImpactChip(BuildContext context, int impact) {
-    final color = _getScoreColor(impact); // green/orange/red reuse
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.5)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.bolt, size: 14, color: color),
-          const SizedBox(width: 4),
-          Text(
-            'Impact $impact/100',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: color,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMiniChip(BuildContext context,
-      {required IconData icon, required String label}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: Theme.of(context).colorScheme.outline),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
           ),
         ],
       ),
@@ -814,6 +642,338 @@ class _ProductCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// The recommendations section as an interactive action plan. Each step has
+/// a checkbox; checked steps roll up into a projected overall-score gain
+/// (sum of their AI impact scores). Checked state persists per analysis so
+/// returning to a report keeps the plan.
+class _RecommendationsPlan extends StatefulWidget {
+  final AnalysisModel analysis;
+
+  const _RecommendationsPlan({required this.analysis});
+
+  @override
+  State<_RecommendationsPlan> createState() => _RecommendationsPlanState();
+}
+
+class _RecommendationsPlanState extends State<_RecommendationsPlan> {
+  /// Step indices are stored against the impact-sorted list so ranks stay
+  /// stable as the plan is checked off.
+  Set<int> _done = {};
+
+  List<RecommendationModel> get _sorted {
+    final recs = [...widget.analysis.recommendations];
+    recs.sort((a, b) => b.impact.compareTo(a.impact));
+    return recs;
+  }
+
+  int get _projectedGain {
+    final recs = _sorted;
+    var sum = 0;
+    for (final i in _done) {
+      if (i >= 0 && i < recs.length) sum += recs[i].impact;
+    }
+    return sum;
+  }
+
+  String get _prefsKey => 'plan_done_${widget.analysis.id}';
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getStringList(_prefsKey) ?? const <String>[];
+    if (mounted) {
+      setState(() => _done = saved.map((s) => int.tryParse(s) ?? -1).toSet()..remove(-1));
+    }
+  }
+
+  Future<void> _toggle(int index) async {
+    setState(() {
+      if (_done.contains(index)) {
+        _done.remove(index);
+      } else {
+        _done.add(index);
+      }
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_prefsKey, _done.map((i) => '$i').toList());
+  }
+
+  Color _scoreColor(int score) {
+    if (score >= 80) return Colors.green;
+    if (score >= 60) return Colors.orange;
+    return Colors.red;
+  }
+
+  /// Gold / silver / bronze for the top 3, neutral grey after that.
+  Color _rankColor(int rank) {
+    switch (rank) {
+      case 1:
+        return const Color(0xFFF59E0B); // amber (gold)
+      case 2:
+        return const Color(0xFF94A3B8); // slate (silver)
+      case 3:
+        return const Color(0xFFB45309); // bronze
+      default:
+        return const Color(0xFF64748B); // neutral slate
+    }
+  }
+
+  Color _categoryColor(String category) {
+    switch (category) {
+      case 'layout':
+        return const Color(0xFF6366F1);
+      case 'organization':
+        return const Color(0xFF0EA5E9);
+      default:
+        return const Color(0xFF8B5CF6);
+    }
+  }
+
+  String _budgetIcon(String tier) {
+    switch (tier) {
+      case 'free':
+        return '💡';
+      case 'low':
+        return '💵';
+      case 'medium':
+        return '💰';
+      case 'premium':
+        return '💎';
+      default:
+        return '💡';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final recs = _sorted;
+    final theme = Theme.of(context);
+    final doneCount = recs.asMap().keys.where(_done.contains).length;
+    final allDone = recs.isNotEmpty && doneCount == recs.length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Action plan',
+                style: theme.textTheme.titleLarge
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+            ),
+            if (recs.isNotEmpty)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '$doneCount/${recs.length} done',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          allDone
+              ? 'All steps done — run a rescan to see your real new score! 🎉'
+              : 'Tick steps as you complete them — projected gain: '
+                  '+$_projectedGain pts',
+          style: theme.textTheme.bodySmall
+              ?.copyWith(color: theme.colorScheme.outline),
+        ),
+        const SizedBox(height: 16),
+        ...recs.asMap().entries.map((entry) {
+          final index = entry.key;
+          final rec = entry.value;
+          final isDone = _done.contains(index);
+          final rank = index + 1;
+          return Card(
+            margin: const EdgeInsets.only(bottom: 16),
+            child: InkWell(
+              onTap: () => _toggle(index),
+              borderRadius: BorderRadius.circular(12),
+              child: Opacity(
+                opacity: isDone ? 0.65 : 1.0,
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: isDone,
+                            onChanged: (_) => _toggle(index),
+                          ),
+                          const SizedBox(width: 4),
+                          _buildRankBadge(context, rank),
+                          const SizedBox(width: 12),
+                          Text(
+                            _budgetIcon(rec.budgetTier),
+                            style: const TextStyle(fontSize: 24),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              rec.title,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                decoration: isDone
+                                    ? TextDecoration.lineThrough
+                                    : null,
+                              ),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: _categoryColor(rec.category)
+                                  .withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              rec.category.toUpperCase(),
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: _categoryColor(rec.category),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(rec.description,
+                          style: theme.textTheme.bodyMedium),
+                      if (rec.reasoning.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          rec.reasoning,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.outline,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          _buildImpactChip(context, rec.impact),
+                          _buildMiniChip(
+                            context,
+                            icon: Icons.payments_outlined,
+                            label: rec.estimatedCost,
+                          ),
+                          _buildMiniChip(
+                            context,
+                            icon: Icons.fitness_center_outlined,
+                            label: rec.difficulty,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _buildRankBadge(BuildContext context, int rank) {
+    final color = _rankColor(rank);
+    return Container(
+      width: 34,
+      height: 34,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: color.withValues(alpha: 0.15),
+        border: Border.all(color: color, width: 1.5),
+      ),
+      child: Text(
+        '$rank',
+        style: TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.bold,
+          color: color,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImpactChip(BuildContext context, int impact) {
+    final color = _scoreColor(impact);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.bolt, size: 14, color: color),
+          const SizedBox(width: 4),
+          Text(
+            'Impact $impact/100',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMiniChip(BuildContext context,
+      {required IconData icon, required String label}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: Theme.of(context).colorScheme.outline),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+        ],
       ),
     );
   }

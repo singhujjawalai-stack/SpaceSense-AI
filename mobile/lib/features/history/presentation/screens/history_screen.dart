@@ -105,6 +105,7 @@ class _HistoryCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       child: InkWell(
@@ -176,6 +177,35 @@ class _HistoryCard extends ConsumerWidget {
                             color: Colors.grey[500],
                           ),
                     ),
+                    // Progress vs the previous scan of the same room
+                    if (analysis.scoreDelta != null &&
+                        analysis.scoreDelta != 0) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            analysis.scoreDelta! > 0
+                                ? Icons.trending_up
+                                : Icons.trending_down,
+                            size: 14,
+                            color: analysis.scoreDelta! > 0
+                                ? Colors.green[700]
+                                : Colors.red[700],
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${analysis.scoreDelta! > 0 ? '+' : ''}${analysis.scoreDelta} pts',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: analysis.scoreDelta! > 0
+                                  ? Colors.green[700]
+                                  : Colors.red[700],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),

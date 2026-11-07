@@ -213,9 +213,9 @@ class _ReimagineScreenState extends ConsumerState<ReimagineScreen> {
                   const BorderRadius.vertical(top: Radius.circular(16)),
               child: item.status == ReimagineStatus.done &&
                       item.imagePath != null
-                  ? Image.file(
-                      File(item.imagePath!),
-                      fit: BoxFit.cover,
+                  ? _BeforeAfterSlider(
+                      beforePath: widget.imageFile.path,
+                      afterPath: item.imagePath!,
                     )
                   : item.status == ReimagineStatus.generating
                       ? Container(
@@ -276,5 +276,159 @@ class _ReimagineScreenState extends ConsumerState<ReimagineScreen> {
   }
 
   bool _busy(ReimagineSession session) => session.running;
+}
+
+/// Drag-to-compare "before" (original photo) vs "after" (AI-generated).
+/// A vertical divider slides horizontally; the left side reveals the
+/// original. Defaults to a mid split so the wow moment lands immediately.
+class _BeforeAfterSlider extends StatefulWidget {
+  final String beforePath;
+  final String afterPath;
+
+  const _BeforeAfterSlider({required this.beforePath, required this.afterPath});
+
+  @override
+  State<_BeforeAfterSlider> createState() => _BeforeAfterSliderState();
+}
+
+class _BeforeAfterSliderState extends State<_BeforeAfterSlider> {
+  /// Fraction of the width showing the BEFORE image on the left. 0 = all
+  /// "after", 1 = all "before".
+  double _pos = 0.5;
+
+  void _onDrag(DragUpdateDetails details) {
+    _track(details.globalPosition);
+  }
+
+  void _onDragStart(DragStartDetails details) {
+    _track(details.globalPosition);
+  }
+
+  void _track(Offset global) {
+    final box = context.findRenderObject() as RenderBox;
+    final local = box.globalToLocal(global);
+    setState(() {
+      _pos = (local.dx / box.size.width).clamp(0.05, 0.95);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth;
+        final clipWidth = w * _pos;
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragStart: _onDragStart,
+          onHorizontalDragUpdate: _onDrag,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // After (right side, full background)
+              Image.file(
+                File(widget.afterPath),
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  color: Colors.black12,
+                  alignment: Alignment.center,
+                  child: const Icon(Icons.image_not_supported),
+                ),
+              ),
+
+              // Before — clipped to the left fraction, drawn at full size
+              // so both photos stay perfectly registered.
+              Positioned(
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: clipWidth,
+                child: ClipRect(
+                  child: OverflowBox(
+                    alignment: Alignment.centerLeft,
+                    minWidth: 0,
+                    maxWidth: w,
+                    maxHeight: constraints.maxHeight,
+                    child: SizedBox(
+                      width: w,
+                      child: Image.file(
+                        File(widget.beforePath),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) =>
+                            Container(color: Colors.black12),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              // Divider + handle
+              Positioned(
+                left: clipWidth - 1.5,
+                top: 0,
+                bottom: 0,
+                width: 3,
+                child: Container(color: Colors.white),
+              ),
+              Positioned(
+                left: clipWidth - 22,
+                top: 0,
+                bottom: 0,
+                width: 44,
+                child: Center(
+                  child: Container(
+                    width: 34,
+                    height: 34,
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black38,
+                          blurRadius: 6,
+                        ),
+                      ],
+                    ),
+                    child: const Icon(Icons.chevron_left, size: 18),
+                  ),
+                ),
+              ),
+
+              // Labels
+              Positioned(
+                left: 10,
+                top: 10,
+                child: _label('BEFORE'),
+              ),
+              Positioned(
+                right: 10,
+                top: 10,
+                child: _label('AFTER'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _label(String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.black45,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 1,
+        ),
+      ),
+    );
+  }
 }
 
