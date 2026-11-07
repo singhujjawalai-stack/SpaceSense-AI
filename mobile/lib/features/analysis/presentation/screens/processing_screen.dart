@@ -9,6 +9,8 @@ import '../../../../core/utils/storage_service.dart';
 import '../../../../shared/models/analysis_model.dart';
 import '../../../../shared/models/api_key_model.dart';
 import '../../../settings/data/api_key_service.dart';
+import '../../../history/presentation/screens/history_screen.dart'
+    show analysesProvider;
 import 'results_screen.dart';
 
 final aiServiceProvider = Provider((ref) => AiService());
@@ -160,6 +162,11 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
         analysis.id,
       );
 
+      // Home's stats strip and the History list both read this provider;
+      // refreshing it now means returning tabs show the new scan instantly
+      // (no stale counters, no pull-to-refresh required).
+      ref.invalidate(analysesProvider);
+
       setState(() => _isProcessing = false);
 
       // Navigate to results
@@ -209,16 +216,7 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                if (_isProcessing)
-                  SizedBox(
-                    width: 96,
-                    height: 96,
-                    child: CircularProgressIndicator(
-                      color: theme.colorScheme.primary,
-                      strokeWidth: 3,
-                    ),
-                  )
-                else
+                if (!_isProcessing)
                   Icon(
                     Icons.error_outline,
                     size: 96,

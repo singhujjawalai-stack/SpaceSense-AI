@@ -6,7 +6,6 @@ import '../../../camera/presentation/screens/camera_screen.dart';
 import '../../../history/presentation/screens/history_screen.dart';
 import '../../../settings/presentation/screens/settings_screen.dart';
 import '../../../settings/data/api_key_service.dart';
-import '../../../../shared/models/analysis_model.dart';
 import '../../../../shared/models/api_key_model.dart';
 import '../../../analysis/presentation/screens/results_screen.dart';
 import '../../../../core/utils/sample_analysis.dart';
@@ -488,6 +487,7 @@ class _KeyOnboardingSheetState extends ConsumerState<_KeyOnboardingSheet> {
       // Refresh the cached provider so Home/camera flows see the new key.
       ref.invalidate(apiKeyProvider);
       if (!mounted) return;
+      FocusManager.instance.primaryFocus?.unfocus();
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -598,7 +598,6 @@ class _KeyOnboardingSheetState extends ConsumerState<_KeyOnboardingSheet> {
               const SizedBox(height: 8),
               TextField(
                 controller: _keyController,
-                autofocus: true,
                 obscureText: true,
                 decoration: InputDecoration(
                   labelText: 'API key',
@@ -747,38 +746,18 @@ class _KeyOnboardingSheetState extends ConsumerState<_KeyOnboardingSheet> {
 }
 
 /// Quick stats strip: total scans, average score, best room.
-/// Loads directly from local storage so it refreshes whenever the tab reopens.
-class _QuickStats extends ConsumerStatefulWidget {
+/// Watches [analysesProvider] so it updates reactively the moment a new
+/// analysis is saved (the provider is invalidated by the processing screen).
+class _QuickStats extends ConsumerWidget {
   const _QuickStats();
 
   @override
-  ConsumerState<_QuickStats> createState() => _QuickStatsState();
-}
-
-class _QuickStatsState extends ConsumerState<_QuickStats> {
-  List<AnalysisModel>? _analyses;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final storage = ref.read(storageServiceProvider);
-    final jsons = await storage.getAllAnalyses();
-    if (!mounted) return;
-    setState(() {
-      _analyses = jsons.map((j) => AnalysisModel.fromJson(j)).toList();
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final analysesAsync = ref.watch(analysesProvider);
 
-    if (_analyses == null) {
-      return const Center(
+    return analysesAsync.when(
+      loading: () => const Center(
         child: Padding(
           padding: EdgeInsets.symmetric(vertical: 24),
           child: SizedBox(
@@ -787,56 +766,59 @@ class _QuickStatsState extends ConsumerState<_QuickStats> {
             child: CircularProgressIndicator(strokeWidth: 2),
           ),
         ),
-      );
-    }
+      ),
+      error: (_, __) => _emptyCard(theme),
+      data: (analyses) {
+        if (analyses.isEmpty) return _emptyCard(theme);
 
-    if (_analyses!.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: theme.colorScheme.outlineVariant),
-        ),
-        child: Row(
+        final count = analyses.length;
+        final avg = analyses.map((a) => a.scores.overall).reduce((a, b) => a + b) /
+            count;
+        final best = analyses
+            .reduce((a, b) => a.scores.overall >= b.scores.overall ? a : b);
+
+        return Row(
           children: [
-            Icon(Icons.insights_outlined,
-                color: theme.colorScheme.primary, size: 28),
+            Expanded(
+                child: _statCard(theme, Icons.photo_camera_outlined,
+                    count.toString(), 'Scans', null)),
             const SizedBox(width: 12),
             Expanded(
-              child: Text(
-                'No scans yet — your stats will appear here',
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: theme.colorScheme.outline),
-              ),
-            ),
+                child: _statCard(theme, Icons.grade_outlined,
+                    avg.round().toString(), 'Avg score', _scoreColor(avg.round()))),
+            const SizedBox(width: 12),
+            Expanded(
+                child: _statCard(theme, Icons.emoji_events_outlined,
+                    best.scores.overall.toString(), best.roomName,
+                    _scoreColor(best.scores.overall))),
           ],
-        ),
-      );
-    }
+        );
+      },
+    );
+  }
 
-    final count = _analyses!.length;
-    final avg = _analyses!
-            .map((a) => a.scores.overall)
-            .reduce((a, b) => a + b) /
-        count;
-    final best = _analyses!.reduce(
-        (a, b) => a.scores.overall >= b.scores.overall ? a : b);
-
-    return Row(
-      children: [
-        Expanded(
-            child: _statCard(theme, Icons.photo_camera_outlined,
-                count.toString(), 'Scans', null)),
-        const SizedBox(width: 12),
-        Expanded(
-            child: _statCard(theme, Icons.grade_outlined, avg.round().toString(),
-                'Avg score', _scoreColor(avg.round()))),
-        const SizedBox(width: 12),
-        Expanded(
-            child: _statCard(theme, Icons.emoji_events_outlined,
-                best.scores.overall.toString(), best.roomName, _scoreColor(best.scores.overall))),
-      ],
+  Widget _emptyCard(ThemeData theme) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.insights_outlined,
+              color: theme.colorScheme.primary, size: 28),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'No scans yet — your stats will appear here',
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(color: theme.colorScheme.outline),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

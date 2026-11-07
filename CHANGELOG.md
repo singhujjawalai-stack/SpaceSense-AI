@@ -3,6 +3,15 @@
 All notable changes to SpaceSense AI. High-level only — for every detail,
 see the commit history on GitHub.
 
+## [1.2.3] — 2026-11-07
+
+### Improved
+- Analysis failures are honest: automatic retries now fit in a ~3.5-minute
+  total budget, and the final message explains what to try next
+- Cleaner analysis screen (progress tracker without the oversized spinner)
+- Keyboard never auto-pops anymore and hides itself when finished
+- Home stats and History update instantly after each analysis
+
 ## [1.2.2] — 2026-11-07
 
 ### Added

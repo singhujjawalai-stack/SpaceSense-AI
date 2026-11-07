@@ -18,9 +18,9 @@ class AiService {
 
   late final Dio _dio = Dio(
     BaseOptions(
-      connectTimeout: const Duration(seconds: 60),
+      connectTimeout: const Duration(seconds: 45),
       sendTimeout: const Duration(seconds: 60),
-      receiveTimeout: const Duration(seconds: 180),
+      receiveTimeout: const Duration(seconds: 120),
     ),
   );
 
@@ -343,42 +343,63 @@ class AiService {
 
   /// Mobile Wi-Fi regularly drops mid-request ("Software caused connection
   /// abort", timeouts). Those are transient — retry up to 2 extra times with
-  /// short backoff before failing the analysis, so users don't pay a full
-  /// 2-minute wait twice by hand.
+  /// short backoff, but inside a HARD TOTAL BUDGET (~3.5 min). Beyond that a
+  /// degraded connection rarely recovers mid-analysis, and the user's time
+  /// matters more than a third retry that repeats the same stall.
   Future<T> _retryTransient<T>(Future<T> Function() attempt) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 210));
     var delayMs = 1500;
     for (var tryIndex = 0; tryIndex < 3; tryIndex++) {
       try {
         return await attempt();
       } on DioException catch (e) {
-        final transient = tryIndex < 2 &&
-            (e.type == DioExceptionType.connectionError ||
-                e.type == DioExceptionType.connectionTimeout ||
-                e.type == DioExceptionType.receiveTimeout ||
-                '${e.error ?? e.message}'.contains('connection abort') ||
-                '${e.error ?? e.message}'.contains('connection refused') ||
-                '${e.error ?? e.message}'.contains('connection reset'));
+        final transient = e.type == DioExceptionType.connectionError ||
+            e.type == DioExceptionType.connectionTimeout ||
+            e.type == DioExceptionType.receiveTimeout ||
+            '${e.error ?? e.message}'.contains('connection abort') ||
+            '${e.error ?? e.message}'.contains('connection refused') ||
+            '${e.error ?? e.message}'.contains('connection reset');
         if (!transient) throw AiException.fromDio(e);
-        _logger.w('Transient network failure (${e.type}), retrying…');
+        if (tryIndex >= 2 || DateTime.now().isAfter(deadline)) {
+          _throwExhausted(e.type == DioExceptionType.receiveTimeout);
+        }
+        _logger.w(
+            'Transient network failure (${e.type}), retrying within budget…');
       } on AiException catch (e) {
         final msg = e.message.toLowerCase();
-        final transient = tryIndex < 2 &&
-            (msg.contains('connection abort') ||
-                msg.contains('no internet') ||
-                msg.contains('took too long') ||
-                msg.contains('unknown network error') ||
-                // Per-minute caps often clear within seconds; retry once.
-                (msg.contains('rate limit') && tryIndex == 0));
+        final transient = msg.contains('connection abort') ||
+            msg.contains('no internet') ||
+            msg.contains('took too long') ||
+            msg.contains('unknown network error') ||
+            // Per-minute caps often clear within seconds; retry once.
+            (msg.contains('rate limit') && tryIndex == 0);
         if (!transient) rethrow;
+        if (tryIndex >= 2 || DateTime.now().isAfter(deadline)) {
+          _throwExhausted(msg.contains('took too long'));
+        }
         _logger.w('Transient AI failure, retrying: ${e.message}');
       }
       await Future<void>.delayed(Duration(milliseconds: delayMs));
       delayMs *= 2;
     }
-    // Third failure — final, properly wrapped attempt already rethrown;
-    // unreachable, but the compiler needs a return.
+    // Unreachable (loop always returns or throws), kept for the compiler.
     throw const AiException(
         'The AI request kept failing. Please check your connection and try again.');
+  }
+
+  /// All retries used up (or the time budget blown) — one honest, actionable
+  /// message instead of three minutes of silence followed by a vague one.
+  Never _throwExhausted(bool tookTooLong) {
+    throw AiException(
+      tookTooLong
+          ? "The AI didn't respond in time, even after automatic retries. "
+              'Fast Wi-Fi usually completes this in about a minute.\n\n'
+              'Try again — or if it keeps happening, a quick test on a mobile '
+              'hotspot will tell us if this Wi-Fi is dropping long uploads.'
+          : 'Your connection dropped repeatedly even after automatic '
+              'retries. Try again — or test briefly on a mobile hotspot to '
+              'rule out this Wi-Fi.',
+    );
   }
 
   /// Result of a full room analysis (everything the app needs).
