@@ -19,6 +19,7 @@ class AiService {
   late final Dio _dio = Dio(
     BaseOptions(
       connectTimeout: const Duration(seconds: 60),
+      sendTimeout: const Duration(seconds: 60),
       receiveTimeout: const Duration(seconds: 180),
     ),
   );
@@ -340,6 +341,46 @@ class AiService {
             'no-cost route.');
   }
 
+  /// Mobile Wi-Fi regularly drops mid-request ("Software caused connection
+  /// abort", timeouts). Those are transient — retry up to 2 extra times with
+  /// short backoff before failing the analysis, so users don't pay a full
+  /// 2-minute wait twice by hand.
+  Future<T> _retryTransient<T>(Future<T> Function() attempt) async {
+    var delayMs = 1500;
+    for (var tryIndex = 0; tryIndex < 3; tryIndex++) {
+      try {
+        return await attempt();
+      } on DioException catch (e) {
+        final transient = tryIndex < 2 &&
+            (e.type == DioExceptionType.connectionError ||
+                e.type == DioExceptionType.connectionTimeout ||
+                e.type == DioExceptionType.receiveTimeout ||
+                '${e.error ?? e.message}'.contains('connection abort') ||
+                '${e.error ?? e.message}'.contains('connection refused') ||
+                '${e.error ?? e.message}'.contains('connection reset'));
+        if (!transient) throw AiException.fromDio(e);
+        _logger.w('Transient network failure (${e.type}), retrying…');
+      } on AiException catch (e) {
+        final msg = e.message.toLowerCase();
+        final transient = tryIndex < 2 &&
+            (msg.contains('connection abort') ||
+                msg.contains('no internet') ||
+                msg.contains('took too long') ||
+                msg.contains('unknown network error') ||
+                // Per-minute caps often clear within seconds; retry once.
+                (msg.contains('rate limit') && tryIndex == 0));
+        if (!transient) rethrow;
+        _logger.w('Transient AI failure, retrying: ${e.message}');
+      }
+      await Future<void>.delayed(Duration(milliseconds: delayMs));
+      delayMs *= 2;
+    }
+    // Third failure — final, properly wrapped attempt already rethrown;
+    // unreachable, but the compiler needs a return.
+    throw const AiException(
+        'The AI request kept failing. Please check your connection and try again.');
+  }
+
   /// Result of a full room analysis (everything the app needs).
   /// The returned map matches AnalysisModel.fromJson, plus it contains
   /// the raw vision fields under 'vision' for future use.
@@ -358,34 +399,34 @@ class AiService {
 
     try {
       String? googleUsedModel;
-      final String contentText = switch (provider) {
-        'openai' => await _callOpenai(
-            imageBase64: imageBase64,
-            prompt: prompt,
-            model: model,
-            apiKey: apiKey,
-          ),
-        'anthropic' => await _callAnthropic(
-            imageBase64: imageBase64,
-            prompt: prompt,
-            model: model,
-            apiKey: apiKey,
-          ),
-        'openrouter' => await _callOpenrouterText(
-            imageBase64: imageBase64,
-            prompt: prompt,
-            model: model,
-            apiKey: apiKey,
-          ),
-        'google' => await _callGoogleWithFallback(
-            imageBase64: imageBase64,
-            prompt: prompt,
-            model: model,
-            apiKey: apiKey,
-            onModelUsed: (m) => googleUsedModel = m,
-          ),
-        _ => throw AiException('Unsupported provider: $provider'),
-      };
+      final String contentText = await _retryTransient(() => switch (provider) {
+            'openai' => _callOpenai(
+                imageBase64: imageBase64,
+                prompt: prompt,
+                model: model,
+                apiKey: apiKey,
+              ),
+            'anthropic' => _callAnthropic(
+                imageBase64: imageBase64,
+                prompt: prompt,
+                model: model,
+                apiKey: apiKey,
+              ),
+            'openrouter' => _callOpenrouterText(
+                imageBase64: imageBase64,
+                prompt: prompt,
+                model: model,
+                apiKey: apiKey,
+              ),
+            'google' => _callGoogleWithFallback(
+                imageBase64: imageBase64,
+                prompt: prompt,
+                model: model,
+                apiKey: apiKey,
+                onModelUsed: (m) => googleUsedModel = m,
+              ),
+            _ => throw AiException('Unsupported provider: $provider'),
+          });
 
       final vision = _extractJson(contentText);
 
@@ -469,11 +510,11 @@ class AiService {
     } on AiException {
       rethrow;
     } on DioException catch (e) {
-      _logger.e('AI request failed: $e');
+      _logger.e('AI request failed: ${AiException._redact(e.toString())}');
       throw AiException.fromDio(e);
     } catch (e) {
-      _logger.e('Analysis failed: $e');
-      throw AiException('Analysis failed: $e');
+      _logger.e('Analysis failed: ${AiException._redact(e.toString())}');
+      throw AiException('Analysis failed: ${AiException._redact(e.toString())}');
     }
   }
 
@@ -1126,10 +1167,25 @@ class AiException implements Exception {
             return AiException(
               'AI request failed'
               '${status != null ? ' (HTTP $status)' : ''}'
-              '${detail != null ? ': $detail' : ': ${e.error ?? e.message ?? 'unknown network error — try again'}.'}',
+              '${detail != null ? ': $detail' : ': ${_redact('${e.error ?? e.message ?? 'unknown network error — try again'}')}.'}',
             );
         }
     }
+  }
+
+  /// Removes any credentials embedded in provider error text before it can
+  /// reach a dialog, snackbar or log. Gemini URLs carry "?key=..."; other
+  /// providers use Bearer tokens.
+  static String _redact(String text) {
+    var redacted = text.replaceAllMapped(
+      RegExp(r'([?&](?:key|apiKey|api_key|access_token|token)=)[^&\s"]+'),
+      (m) => '${m.group(1)}***',
+    );
+    redacted = redacted.replaceAllMapped(
+      RegExp(r'Bearer\s+[A-Za-z0-9._\-]+'),
+      (m) => 'Bearer ***',
+    );
+    return redacted;
   }
 
   static String? _extractErrorDetail(dynamic data) {
