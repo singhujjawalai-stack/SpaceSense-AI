@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/ai/ai_service.dart';
 import '../../../../core/utils/storage_service.dart';
+import '../../../../core/utils/usage_tracker.dart';
 import '../../../settings/data/api_key_service.dart';
 
 /// The available reimagine styles (shared by the controller and the screen).
@@ -250,6 +251,9 @@ class ReimagineController extends StateNotifier<ReimagineGlobalState> {
               imagePath: path.isNotEmpty ? path : null,
             ),
           );
+          // Meter today's usage for the Settings gauge (only on success).
+          await _ref.read(usageTrackerProvider).recordImage();
+          _ref.invalidate(usageProvider);
         } on AiException catch (e) {
           _updateItem(
             analysisId,

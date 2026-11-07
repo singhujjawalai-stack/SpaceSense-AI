@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../auth/data/auth_service.dart';
 import '../../../settings/data/api_key_service.dart';
 import '../../../../core/ai/ai_service.dart';
+import '../../../../core/utils/usage_tracker.dart';
 import '../../../../shared/models/api_key_model.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -295,6 +296,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 subtitle: Text(user?.email ?? 'Not logged in'),
               ),
             ),
+            const SizedBox(height: 32),
+
+            // Usage gauge — today's counts with a midnight-Pacific reset
+            _UsageCard(),
             const SizedBox(height: 32),
 
             // API Configuration section
@@ -594,6 +599,104 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Today's usage gauge: the honest version of a quota indicator. Providers
+/// don't expose remaining quota, so this counts today's paid attention:
+/// how many room analyses and images the user has spent, with the reset
+/// time called out. Zero network calls — a passive local counter.
+class _UsageCard extends ConsumerWidget {
+  const _UsageCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final usageAsync = ref.watch(usageProvider);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          "Today's Usage",
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: usageAsync.maybeWhen(
+              data: (usage) => Row(
+                children: [
+                  Expanded(
+                    child: _usageCell(
+                      theme,
+                      Icons.psychology,
+                      '${usage.analyses}',
+                      'Room analyses',
+                    ),
+                  ),
+                  Container(
+                    width: 1,
+                    height: 40,
+                    color: theme.dividerColor,
+                  ),
+                  Expanded(
+                    child: _usageCell(
+                      theme,
+                      Icons.auto_awesome,
+                      '${usage.images}',
+                      'Images generated',
+                    ),
+                  ),
+                ],
+              ),
+              orElse: () => const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(8.0),
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Free quotas reset daily, around 1:30 PM IST (midnight Pacific).',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.outline,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _usageCell(
+      ThemeData theme, IconData icon, String value, String label) {
+    return Column(
+      children: [
+        Icon(icon, size: 22, color: theme.colorScheme.primary),
+        const SizedBox(height: 6),
+        Text(
+          value,
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        Text(
+          label,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.outline,
+          ),
+        ),
+      ],
     );
   }
 }

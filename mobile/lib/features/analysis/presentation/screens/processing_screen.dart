@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'dart:convert';
 import '../../../../core/ai/ai_service.dart';
 import '../../../../core/utils/storage_service.dart';
+import '../../../../core/utils/usage_tracker.dart';
 import '../../../../shared/models/analysis_model.dart';
 import '../../../../shared/models/api_key_model.dart';
 import '../../../settings/data/api_key_service.dart';
@@ -89,7 +90,7 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
       final apiKey = await apiKeyService.getApiKey();
 
       if (apiKey == null) {
-        throw AiException(
+        throw const AiException(
             'No API key configured. Please add your key in Settings.');
       }
 
@@ -167,6 +168,10 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
       // (no stale counters, no pull-to-refresh required).
       ref.invalidate(analysesProvider);
 
+      // Meter today's usage for the Settings gauge.
+      await ref.read(usageTrackerProvider).recordAnalysis();
+      ref.invalidate(usageProvider);
+
       setState(() => _isProcessing = false);
 
       // Navigate to results
@@ -178,18 +183,68 @@ class _ProcessingScreenState extends ConsumerState<ProcessingScreen> {
         );
       }
     } catch (e) {
+      final apiKeyService = ref.read(apiKeyServiceProvider);
       setState(() {
         _isProcessing = false;
         _errorMessage = e.toString();
       });
 
+      // Rate-limit offer: if an OpenRouter key is available, the failed
+      // analysis can be retried on their free models with one tap —
+      // instead of sending the user to Settings mid-flow.
+      final message = e.toString();
+      final isRateLimited = message.contains('Rate limit') ||
+          message.contains('(HTTP 429)') ||
+          message.toLowerCase().contains('quota');
+      String? switchKey;
+      if (isRateLimited) {
+        final savedKey = await apiKeyService.getApiKey();
+        if (savedKey != null && savedKey.provider != SupportedProvider.openrouter) {
+          final orKey = await apiKeyService.getOpenRouterKey();
+          final trimmed = orKey?.trim() ?? '';
+          if (trimmed.isNotEmpty) switchKey = trimmed;
+        }
+      }
+
       if (mounted) {
         showDialog(
           context: context,
-          builder: (context) => AlertDialog(
+          builder: (dialogContext) => AlertDialog(
             title: const Text('Analysis Failed'),
-            content: Text(e.toString()),
+            content: Text(
+              isRateLimited && switchKey != null
+                  ? '$message\n\nTip: your saved OpenRouter key can retry '
+                      'this analysis on free text models right now.'
+                  : isRateLimited
+                      ? '$message\n\nTip: adding a free OpenRouter key in '
+                          'Settings enables free text models as a backup.'
+                      : message,
+            ),
             actions: [
+              if (isRateLimited && switchKey != null)
+                TextButton.icon(
+                  icon: const Icon(Icons.swap_horiz),
+                  label: const Text('Use free OpenRouter models'),
+                  onPressed: () async {
+                    await apiKeyService.saveApiKey(ApiKeyModel(
+                      provider: SupportedProvider.openrouter,
+                      model: SupportedProvider
+                          .models[SupportedProvider.openrouter]!.first,
+                      apiKey: switchKey!,
+                    ));
+                    ref.invalidate(apiKeyProvider);
+                    if (!mounted) return;
+                    if (dialogContext.mounted) {
+                      Navigator.of(dialogContext).pop();
+                    }
+                    setState(() {
+                      _isProcessing = true;
+                      _stage = 0;
+                      _elapsedSeconds = 0;
+                    });
+                    _processImage();
+                  },
+                ),
               TextButton(
                 onPressed: () {
                   Navigator.of(context).pop();

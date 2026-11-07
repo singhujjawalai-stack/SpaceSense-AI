@@ -13,12 +13,114 @@ final analysesProvider = FutureProvider<List<AnalysisModel>>((ref) async {
   return analyses.map((json) => AnalysisModel.fromJson(json)).toList();
 });
 
-class HistoryScreen extends ConsumerWidget {
+class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HistoryScreen> createState() => _HistoryScreenState();
+}
+
+class _HistoryScreenState extends ConsumerState<HistoryScreen> {
+  final _searchController = TextEditingController();
+  String _query = '';
+  /// 'newest' (default), 'best' (score desc), 'worst' (score asc).
+  String _sort = 'newest';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Widget _sortChip(String value, String label) {
+    final selected = _sort == value;
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      visualDensity: VisualDensity.compact,
+      onSelected: (_) => setState(() => _sort = value),
+    );
+  }
+
+  /// True empty state (never scanned) vs "no matches" for the search.
+  Widget _buildEmptyOrFiltered(bool neverScanned) {
+    if (neverScanned) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primary.withOpacity(0.08),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.photo_camera_back_outlined,
+                size: 56,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'No analysis history yet',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Take your first room photo to get started',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Colors.grey[500],
+                  ),
+            ),
+          ],
+        ),
+      );
+    }
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.search_off, size: 56, color: Colors.grey[400]),
+          const SizedBox(height: 16),
+          Text(
+            'No rooms match "$_query"',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final analysesAsync = ref.watch(analysesProvider);
+
+    // Search + sort applied once here so both filtering and the count
+    // label agree.
+    final filtered = analysesAsync.maybeWhen(
+      data: (analyses) {
+        final q = _query.trim().toLowerCase();
+        final matches = analyses.where((a) {
+          if (q.isEmpty) return true;
+          final room = a.roomName.toLowerCase();
+          final type = a.roomType.replaceAll('_', ' ').toLowerCase();
+          return room.contains(q) || type.contains(q);
+        }).toList();
+        switch (_sort) {
+          case 'best':
+            matches.sort((a, b) => b.scores.overall.compareTo(a.scores.overall));
+            break;
+          case 'worst':
+            matches.sort((a, b) => a.scores.overall.compareTo(b.scores.overall));
+            break;
+          default:
+            break; // provider already sorts newest-first
+        }
+        return matches;
+      },
+      orElse: () => <AnalysisModel>[],
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -28,52 +130,79 @@ class HistoryScreen extends ConsumerWidget {
       ),
       body: analysesAsync.when(
         data: (analyses) {
-          if (analyses.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary.withOpacity(0.08),
-                      shape: BoxShape.circle,
+          return Column(
+            children: [
+              // Search + sort controls — chips centered between the search
+              // field and the list (8px air on each side).
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _query.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.clear, size: 18),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() => _query = '');
+                            },
+                          ),
+                    hintText: 'Search rooms…',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Icon(
-                      Icons.photo_camera_back_outlined,
-                      size: 56,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
                   ),
-                  const SizedBox(height: 20),
-                  Text(
-                    'No analysis history yet',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Take your first room photo to get started',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.grey[500],
-                        ),
-                  ),
-                ],
+                  onChanged: (value) => setState(() => _query = value),
+                ),
               ),
-            );
-          }
-
-          return RefreshIndicator(
-            onRefresh: () async {
-              ref.invalidate(analysesProvider);
-            },
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16.0),
-              itemCount: analyses.length,
-              itemBuilder: (context, index) {
-                final analysis = analyses[index];
-                return _HistoryCard(analysis: analysis);
-              },
-            ),
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Wrap(
+                        spacing: 8,
+                        children: [
+                          _sortChip('newest', 'Newest'),
+                          _sortChip('best', 'Top scores'),
+                          _sortChip('worst', 'Needs attention'),
+                        ],
+                      ),
+                    ),
+                    if (filtered.length != analyses.length)
+                      Text(
+                        '${filtered.length}/${analyses.length}',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: Colors.grey[500]),
+                      ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: filtered.isEmpty
+                    ? _buildEmptyOrFiltered(analyses.isEmpty)
+                    : RefreshIndicator(
+                        onRefresh: () async {
+                          ref.invalidate(analysesProvider);
+                        },
+                        child: ListView.builder(
+                          padding:
+                              const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                          itemCount: filtered.length,
+                          itemBuilder: (context, index) {
+                            final analysis = filtered[index];
+                            return _HistoryCard(analysis: analysis);
+                          },
+                        ),
+                      ),
+              ),
+            ],
           );
         },
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -234,7 +363,8 @@ class _HistoryCard extends ConsumerWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: _getScoreColor(analysis.scores.overall).withOpacity(0.1),
+                  color: _getScoreColor(analysis.scores.overall)
+                      .withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: _getScoreColor(analysis.scores.overall),

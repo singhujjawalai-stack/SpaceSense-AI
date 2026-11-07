@@ -3,6 +3,17 @@
 All notable changes to SpaceSense AI. High-level only — for every detail,
 see the commit history on GitHub.
 
+## [1.3.0] — 2026-11-07
+
+### Added
+- **Today's Usage** gauge in Settings: how many room analyses and images
+  you've run today on the free tiers, resetting daily at ~1:30 PM IST
+  (midnight Pacific)
+- **Fast recovery from rate limits**: if an analysis hits a provider quota,
+  the failure dialog offers a one-tap retry on OpenRouter's free models
+- **History search & sort**: find scans by room name, and reorder by
+  newest, top scores, or ones needing attention
+
 ## [1.2.3] — 2026-11-07
 
 ### Improved
